@@ -24,7 +24,7 @@ rsync -avh --delete \
   --bwlimit=2000 \
   -e "ssh -o StrictHostKeyChecking=accept-new" \
   "${SOURCE_DIR}" \
-  "${DEST_USER}@${DEST_HOST}:${DEST_DIR}" | tee -a "$LOG_FILE"
+  "${DEST_USER}@${DEST_HOST}:${DEST_DIR}" 2>&1 | tee -a "$LOG_FILE"
 
 if [ ${PIPESTATUS[0]} -eq 0 ]; then
     echo "--- Sync Completed Successfully: $(date) ---" | tee -a "$LOG_FILE"
