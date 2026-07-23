@@ -4,6 +4,8 @@
 # Purpose: Automated disaster recovery push across Tailscale Mesh
 # ==============================================================================
 
+set -uo pipefail
+
 DEST_USER="pi"
 DEST_HOST="100.104.209.126" # Raspberry Pi Tailscale IP
 SOURCE_DIR="/mnt/media-storage/"
@@ -11,6 +13,22 @@ DEST_DIR="/mnt/backup/japan_nas_sync/"
 LOG_FILE="/var/log/dr_sync.log"
 
 echo "--- Starting DR Sync: $(date) ---" | tee -a "$LOG_FILE"
+
+# Verify source mount is present before syncing.
+# Without this check, if /mnt/media-storage is not mounted, rsync would
+# sync an empty directory and --delete would wipe the remote backup.
+if ! mountpoint -q "${SOURCE_DIR%/}"; then
+    echo "ERROR: Source ${SOURCE_DIR} is not a mounted filesystem. Aborting." | tee -a "$LOG_FILE"
+    exit 1
+fi
+
+# Verify destination mount is present on the remote node.
+# Prevents syncing to a bare mount point if the external SSD failed to mount
+# (the nofail fstab option means the Pi boots even when the drive is missing).
+if ! ssh -o StrictHostKeyChecking=accept-new "${DEST_USER}@${DEST_HOST}" "mountpoint -q /mnt/backup"; then
+    echo "ERROR: Remote /mnt/backup is not a mounted filesystem. Aborting." | tee -a "$LOG_FILE"
+    exit 1
+fi
 
 # Ensure destination directory exists on the persistent mount in Nepal
 ssh -o StrictHostKeyChecking=accept-new "${DEST_USER}@${DEST_HOST}" "mkdir -p ${DEST_DIR}"
@@ -26,8 +44,9 @@ rsync -avh --delete \
   "${SOURCE_DIR}" \
   "${DEST_USER}@${DEST_HOST}:${DEST_DIR}" 2>&1 | tee -a "$LOG_FILE"
 
-if [ ${PIPESTATUS[0]} -eq 0 ]; then
+if [ "${PIPESTATUS[0]}" -eq 0 ]; then
     echo "--- Sync Completed Successfully: $(date) ---" | tee -a "$LOG_FILE"
 else
     echo "--- Sync FAILED: $(date) ---" | tee -a "$LOG_FILE"
+    exit 1
 fi

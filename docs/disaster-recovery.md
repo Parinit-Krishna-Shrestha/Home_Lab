@@ -101,9 +101,9 @@ With `nofail`, the system boots normally even if the mount fails. The Pi comes o
 
 `nofail` があれば、マウントが失敗してもシステムは正常にブートします。Pi がオンラインになり、Tailscale が接続し、SSH アクセスが復旧 — ドライブのマウント失敗の原因をリモートで診断できます。
 
-> **Engineering trade-off / エンジニアリング上のトレードオフ**: The risk of `nofail` is that the backup sync script might run successfully against an empty `/mnt/backup` directory (just a mount point on the root filesystem) if the SSD fails to mount. This would not replicate any data. A future improvement would be to add a pre-sync mount verification step in `dr_sync.sh`.
+> **Engineering trade-off / エンジニアリング上のトレードオフ**: The risk of `nofail` is that the backup sync script might run against an empty `/mnt/backup` directory (just a mount point on the root filesystem) if the SSD fails to mount. To mitigate this, `dr_sync.sh` performs a `mountpoint -q` check on both the source and destination mounts before starting the sync, aborting with a logged error if either is not a mounted filesystem.
 
-> `nofail` のリスクは、SSD のマウントに失敗した場合、バックアップ同期スクリプトが空の `/mnt/backup` ディレクトリ（ルートファイルシステム上のマウントポイントのみ）に対して正常に実行される可能性があることです。この場合、データはレプリケーションされません。将来の改善として、`dr_sync.sh` に同期前のマウント検証ステップを追加することが考えられます。
+> `nofail` のリスクは、SSD のマウントに失敗した場合、バックアップ同期スクリプトが空の `/mnt/backup` ディレクトリ（ルートファイルシステム上のマウントポイントのみ）に対して実行される可能性があることです。これを軽減するため、`dr_sync.sh` は同期開始前にソースと宛先の両マウントに対して `mountpoint -q` チェックを実行し、いずれかがマウントされたファイルシステムでない場合はエラーをログして中止します。
 
 ---
 
@@ -133,9 +133,9 @@ The Japan and Nepal nodes communicate exclusively through a Tailscale WireGuard 
   <img src="../images/Cross-Site%20Routing.png" alt="Cross-Site Routing" width="700">
 </p>
 
-The `rsync` backup script ([`dr_sync.sh`](../scripts/dr_sync.sh)) runs on the Proxmox host and connects to the Nepal Pi using its Tailscale IP (`100.104.209.126`). Because the Proxmox host does not run Tailscale itself, the SSH connection is routed through CT100's network namespace.
+The `rsync` backup script ([`dr_sync.sh`](../scripts/dr_sync.sh)) runs inside the CT100 gateway container, which has direct Tailscale connectivity to the Nepal Pi (`100.104.209.126`). The host's media storage partition is bind-mounted into CT100 as read-only (`ro=1`), giving the script access to the source data without allowing accidental writes from the container.
 
-`rsync` バックアップスクリプト（[`dr_sync.sh`](../scripts/dr_sync.sh)）は Proxmox ホスト上で実行され、Tailscale IP（`100.104.209.126`）を使用してネパールの Pi に接続します。Proxmox ホスト自体は Tailscale を実行していないため、SSH 接続は CT100 のネットワーク名前空間を経由してルーティングされます。
+`rsync` バックアップスクリプト（[`dr_sync.sh`](../scripts/dr_sync.sh)）は CT100 ゲートウェイコンテナ内で実行され、ネパール Pi（`100.104.209.126`）への Tailscale 接続を直接使用します。ホストのメディアストレージパーティションは読み取り専用（`ro=1`）で CT100 にバインドマウントされており、コンテナからの誤った書き込みを防ぎつつ、スクリプトにソースデータへのアクセスを提供します。
 
 ---
 
@@ -186,7 +186,7 @@ rsync -avh --delete \
 ## Sync Schedule Design / 同期スケジュール設計
 
 ```
-# Cron entry (Proxmox host)
+# Cron entry (CT100 gateway container)
 0 2 1 * * /root/scripts/dr_sync.sh
 ```
 
@@ -273,9 +273,9 @@ Being honest about what this setup does *not* do is as important as describing w
 
    **自動復元テストなし** — バックアップはレプリケーションされますが、復元可能性の自動テストは行われていません。将来の改善として、定期的にファイルのサブセットを復元しチェックサムを検証することが考えられます。
 
-2. **No mount verification before sync** — As noted in the [storage mount section](#storage-mount-design--ストレージマウント設計), if the external SSD fails to mount, the sync script would run against an empty directory without error. Adding a `mountpoint -q /mnt/backup` check would address this.
+2. ~~**No mount verification before sync**~~ — **Resolved.** The sync script now performs `mountpoint -q` checks on both the source and destination mounts before starting, aborting with a logged error if either is not mounted.
 
-   **同期前のマウント検証なし** — [ストレージマウント設計セクション](#storage-mount-design--ストレージマウント設計)で述べたように、外付け SSD のマウントに失敗した場合、同期スクリプトはエラーなしに空のディレクトリに対して実行されます。`mountpoint -q /mnt/backup` チェックの追加でこれに対処可能です。
+   ~~**同期前のマウント検証なし**~~ — **解決済み。** 同期スクリプトは、開始前にソースと宛先の両マウントに対して `mountpoint -q` チェックを実行し、いずれかがマウントされていない場合はエラーをログして中止するようになりました。
 
 3. **No alerting on sync failure** — Sync failures are logged to a file but do not trigger any notification. The failure would only be discovered when manually checking logs or running the healthcheck script.
 

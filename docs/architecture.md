@@ -108,6 +108,7 @@ All containers run as **unprivileged LXC containers**. This is a deliberate secu
 | `cores` | 1 | VPN routing is not CPU-intensive; 1 core is sufficient. |
 | `memory` | 512 MB | Tailscale's `tailscaled` daemon has a small memory footprint. |
 | `rootfs` | 7 GB | Minimal OS install + Tailscale binary. |
+| `mp0` | `/mnt/media-storage` (read-only) | Bind mount of the host's media partition. Mounted `ro=1` so the DR sync script can read source data without write access. |
 | `unprivileged` | 1 | Security best practice (see above). |
 | `features` | `nesting=1` | Required for Tailscale to create its userspace networking. |
 | `onboot` | 1 | Gateway must start automatically — it is the VPN entry point. |

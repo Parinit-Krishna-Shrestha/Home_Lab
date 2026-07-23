@@ -2,6 +2,7 @@
 import subprocess
 import shutil
 import datetime
+import sys
 
 # Define core infrastructure nodes using Tailscale IPs
 NODES = {
@@ -10,6 +11,18 @@ NODES = {
 }
 
 MEDIA_PATH = "/mnt/media-storage"
+LOG_FILE = "/var/log/healthcheck.log"
+
+
+def log(message):
+    """Prints to stdout and appends to the log file."""
+    print(message)
+    try:
+        with open(LOG_FILE, "a") as f:
+            f.write(message + "\n")
+    except OSError as e:
+        print(f"WARNING: Could not write to {LOG_FILE}: {e}", file=sys.stderr)
+
 
 def check_ping(ip):
     """
@@ -18,34 +31,48 @@ def check_ping(ip):
     """
     try:
         # Run: pct exec 100 -- ping -c 1 -W 2 <IP>
-        output = subprocess.run(
+        result = subprocess.run(
             ["pct", "exec", "100", "--", "ping", "-c", "1", "-W", "2", ip],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE
         )
-        return output.returncode == 0
-    except Exception:
+        return result.returncode == 0
+    except FileNotFoundError:
+        log(f"ERROR: 'pct' command not found. Is this running on the Proxmox host?")
+        return False
+    except OSError as e:
+        log(f"ERROR: Failed to execute ping for {ip}: {e}")
         return False
 
+
 def check_storage(path):
-    """Returns free space in GB."""
+    """Returns free space in GB, or -1 if the path does not exist."""
     try:
         usage = shutil.disk_usage(path)
         return usage.free / (1024**3)
     except FileNotFoundError:
         return -1
 
-if __name__ == "__main__":
-    print(f"--- Infrastructure Health Report: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')} ---")
-    
-    print("\n[Network Status]")
-    for name, ip in NODES.items():
-        status = "ONLINE" if check_ping(ip) else "OFFLINE"
-        print(f"{name} ({ip}): {status}")
 
-    print("\n[Storage Status]")
+if __name__ == "__main__":
+    has_failures = False
+
+    log(f"--- Infrastructure Health Report: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')} ---")
+
+    log("\n[Network Status]")
+    for name, ip in NODES.items():
+        is_online = check_ping(ip)
+        status = "ONLINE" if is_online else "OFFLINE"
+        log(f"{name} ({ip}): {status}")
+        if not is_online:
+            has_failures = True
+
+    log("\n[Storage Status]")
     free_space = check_storage(MEDIA_PATH)
     if free_space != -1:
-        print(f"Primary Media Pool: {free_space:.2f} GB free")
+        log(f"Primary Media Pool: {free_space:.2f} GB free")
     else:
-        print("Primary Media Pool: MOUNT POINT NOT FOUND")
+        log("Primary Media Pool: MOUNT POINT NOT FOUND")
+        has_failures = True
+
+    sys.exit(1 if has_failures else 0)
